@@ -1,0 +1,72 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# VS Code, PyCharm, other IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS, Linux, Windows OS files
+.DS_Store
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# dotenv / secret keys
+.env
+.env.*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Pip + poetry
+poetry.lock
+Pipfile.lock
+
+# FAISS Index (if serialized to disk)
+index.faiss
+*.faiss
+faiss_index/
+
+# FastAPI static/runtime
+instance/
+*.db
+
+# Cache and test output
+.cache/
+pytest_cache/
+__snapshots__/
+
+# MyPy, Pyre, Pylint
+.mypy_cache/
+.pyre/
+.pytype/
+.pylint.d/
+
+# Uploads / temp files
+/tmp/
+uploads/
+downloads/
