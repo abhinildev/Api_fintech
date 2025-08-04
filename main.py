@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
+import tempfile
 import requests, fitz, docx, os
 from dotenv import load_dotenv
 
@@ -26,10 +27,12 @@ headers = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
     "Content-Type": "application/json"
 }
+#print("API KEY:", OPENROUTER_API_KEY)
 
 def download_file(url: str) -> str:
     ext = url.split("?")[0].split(".")[-1]
-    path = f"/tmp/temp.{ext}"
+    temp_dir = tempfile.gettempdir()  # Cross-platform temp dir
+    path = os.path.join(temp_dir, f"temp.{ext}")
     response = requests.get(url)
     if response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to download document.")
@@ -61,7 +64,7 @@ def retrieve_chunks(index, query: str, k: int = 4) -> List[str]:
 
 def ask_model(question: str, context: str) -> str:
     payload = {
-        "model": "mistralai/mixtral-8x7b-instruct",
+        "model": "openrouter/horizon-beta",
         "messages": [
             {"role": "system", "content": "You're an expert on policy and legal document questions."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
@@ -69,9 +72,12 @@ def ask_model(question: str, context: str) -> str:
     }
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
     if response.status_code != 200:
-        print("OpenRouter Error:", response.text)
+        print("OpenRouter Error:", response.status_code, response.text)
         return "Model failed. Try again."
-    return response.json()["choices"][0]["message"]["content"]
+    resp_json = response.json()
+    #print("OpenRouter full response:", resp_json)  # <== add this
+    return resp_json["choices"][0]["message"]["content"]
+
 
 @app.post("/api/v1/hackrx/run", response_model=QueryOutput)
 def run_query(data: QueryInput):
