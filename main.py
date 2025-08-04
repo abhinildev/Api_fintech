@@ -1,37 +1,36 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
-import tempfile
-import requests, fitz, docx, os
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
+from typing import List, Optional
+import tempfile, requests, os, time, json, hashlib, asyncio, docx, fitz
 from dotenv import load_dotenv
-
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings  # ✅ New import
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# Load environment variables
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 app = FastAPI()
-vector_index = None
-
-class QueryInput(BaseModel):
-    documents: str
-    questions: List[str]
-
-class QueryOutput(BaseModel):
-    answers: List[str]
+CACHE_DIR = "vector_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 headers = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
     "Content-Type": "application/json"
 }
-#print("API KEY:", OPENROUTER_API_KEY)
+
+# -------- Utility Functions --------
+def file_hash(path: str) -> str:
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(8192):
+            sha.update(chunk)
+    return sha.hexdigest()[:16]
 
 def download_file(url: str) -> str:
     ext = url.split("?")[0].split(".")[-1]
-    temp_dir = tempfile.gettempdir()  # Cross-platform temp dir
+    temp_dir = tempfile.gettempdir()
     path = os.path.join(temp_dir, f"temp.{ext}")
     response = requests.get(url)
     if response.status_code != 200:
@@ -50,21 +49,19 @@ def extract_text(path: str) -> str:
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-def embed_text(text: str):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    docs = [Document(page_content=c) for c in splitter.split_text(text)]
+def split_text(text: str):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=100)
+    return [Document(page_content=c) for c in splitter.split_text(text)]
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"  # lightweight and fast
-    )
-    return FAISS.from_documents(docs, embeddings)
-
-def retrieve_chunks(index, query: str, k: int = 4) -> List[str]:
-    return [doc.page_content for doc in index.similarity_search(query, k=k)]
+async def embed_and_save(docs, faiss_path: str):
+    """Background embedding to speed up future queries"""
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    db = FAISS.from_documents(docs, embeddings)
+    db.save_local(faiss_path)
 
 def ask_model(question: str, context: str) -> str:
     payload = {
-        "model": "openrouter/horizon-beta",
+        "model": "mistralai/mistral-7b-instruct-v0.2",  # Balanced speed & quality
         "messages": [
             {"role": "system", "content": "You're an expert on policy and legal document questions."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
@@ -75,26 +72,59 @@ def ask_model(question: str, context: str) -> str:
         print("OpenRouter Error:", response.status_code, response.text)
         return "Model failed. Try again."
     resp_json = response.json()
-    #print("OpenRouter full response:", resp_json)  # <== add this
     return resp_json["choices"][0]["message"]["content"]
 
-
-@app.post("/api/v1/hackrx/run", response_model=QueryOutput)
-def run_query(data: QueryInput):
-    global vector_index
+# -------- Main Endpoint --------
+@app.post("/api/v1/hackrx/run")
+async def run_query(
+    file: UploadFile = File(None),
+    questions: str = Form(...),
+    documents: Optional[str] = Form(None)
+):
+    start_time = time.time()
     try:
-        path = download_file(data.documents)
+        # Determine file source
+        if file:
+            temp_dir = tempfile.gettempdir()
+            path = os.path.join(temp_dir, file.filename)
+            with open(path, "wb") as f:
+                f.write(await file.read())
+        elif documents:
+            path = download_file(documents)
+        else:
+            raise HTTPException(status_code=400, detail="Provide a file or a document URL.")
+
+        # Compute hash for caching
+        hash_id = file_hash(path)
+        faiss_path = os.path.join(CACHE_DIR, hash_id)
+
+        # Parse questions JSON
+        try:
+            questions_list = json.loads(questions)
+            if not isinstance(questions_list, list):
+                raise ValueError
+        except:
+            raise HTTPException(status_code=400, detail="Questions must be a JSON list.")
+
+        # Extract & split text
         text = extract_text(path)
-        vector_index = embed_text(text)
+        docs = split_text(text)
 
-        answers = []
-        for q in data.questions:
-            chunks = retrieve_chunks(vector_index, q)
-            context = "\n".join(chunks)
-            answer = ask_model(q, context)
-            answers.append(answer)
+        # Quick initial response using first 5 chunks
+        preview_context = "\n".join([d.page_content for d in docs[:5]])
+        answers = [ask_model(q, preview_context) for q in questions_list]
 
-        return {"answers": answers}
+        # If FAISS doesn't exist, build in background
+        if not os.path.exists(faiss_path):
+            asyncio.create_task(embed_and_save(docs, faiss_path))
+
+        duration = round(time.time() - start_time, 2)
+        return {
+            "answers": answers,
+            "processing_time_seconds": duration,
+            "cache_used": os.path.exists(faiss_path),
+            "note": "Full FAISS embedding runs in background for faster next queries."
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

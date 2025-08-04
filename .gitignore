@@ -70,3 +70,5 @@ __snapshots__/
 /tmp/
 uploads/
 downloads/
+
+vector_cache/
