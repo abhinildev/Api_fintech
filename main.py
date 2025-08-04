@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from typing import List, Optional
 import tempfile, requests, os, time, json, hashlib, asyncio, docx, fitz
 from dotenv import load_dotenv
@@ -19,6 +20,11 @@ headers = {
     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
     "Content-Type": "application/json"
 }
+
+# -------- Request Model --------
+class QueryInput(BaseModel):
+    documents: str                     # Must be a URL
+    questions: List[str]                # List of questions
 
 # -------- Utility Functions --------
 def file_hash(path: str) -> str:
@@ -74,57 +80,36 @@ def ask_model(question: str, context: str) -> str:
     resp_json = response.json()
     return resp_json["choices"][0]["message"]["content"]
 
-# -------- Main Endpoint --------
-@app.post("/api/v1/hackrx/run")
-async def run_query(
-    file: UploadFile = File(None),
-    questions: str = Form(...),
-    documents: Optional[str] = Form(None)
-):
+async def process_query(file_path: str, questions_list: list):
     start_time = time.time()
-    try:
-        # Determine file source
-        if file:
-            temp_dir = tempfile.gettempdir()
-            path = os.path.join(temp_dir, file.filename)
-            with open(path, "wb") as f:
-                f.write(await file.read())
-        elif documents:
-            path = download_file(documents)
-        else:
-            raise HTTPException(status_code=400, detail="Provide a file or a document URL.")
 
-        # Compute hash for caching
-        hash_id = file_hash(path)
-        faiss_path = os.path.join(CACHE_DIR, hash_id)
+    # Compute hash for caching
+    hash_id = file_hash(file_path)
+    faiss_path = os.path.join(CACHE_DIR, hash_id)
 
-        # Parse questions JSON
-        try:
-            questions_list = json.loads(questions)
-            if not isinstance(questions_list, list):
-                raise ValueError
-        except:
-            raise HTTPException(status_code=400, detail="Questions must be a JSON list.")
+    # Extract & split text
+    text = extract_text(file_path)
+    docs = split_text(text)
 
-        # Extract & split text
-        text = extract_text(path)
-        docs = split_text(text)
+    # Quick initial response using first 5 chunks
+    preview_context = "\n".join([d.page_content for d in docs[:5]])
+    answers = [ask_model(q, preview_context) for q in questions_list]
 
-        # Quick initial response using first 5 chunks
-        preview_context = "\n".join([d.page_content for d in docs[:5]])
-        answers = [ask_model(q, preview_context) for q in questions_list]
+    # If FAISS doesn't exist, build in background
+    if not os.path.exists(faiss_path):
+        asyncio.create_task(embed_and_save(docs, faiss_path))
 
-        # If FAISS doesn't exist, build in background
-        if not os.path.exists(faiss_path):
-            asyncio.create_task(embed_and_save(docs, faiss_path))
+    duration = round(time.time() - start_time, 2)
+    return {
+        "answers": answers,
+        "processing_time_seconds": duration,
+        "cache_used": os.path.exists(faiss_path),
+        "note": "Full FAISS embedding runs in background for faster next queries."
+    }
 
-        duration = round(time.time() - start_time, 2)
-        return {
-            "answers": answers,
-            "processing_time_seconds": duration,
-            "cache_used": os.path.exists(faiss_path),
-            "note": "Full FAISS embedding runs in background for faster next queries."
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# -------- Main Endpoint for Raw JSON --------
+@app.post("/api/v1/hackrx/run")
+async def run_query_json(data: QueryInput):
+    # Download file from URL
+    path = download_file(data.documents)
+    return await process_query(path, data.questions)
