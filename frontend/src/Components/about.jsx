@@ -3,27 +3,27 @@ import React from "react";
 const teamMembers = [
   {
     name: "Abhilash Kashyap",
-    role: "Backend Engineer",
+
     img: "/abhilash.jpeg",
-    bio: "Designed and implemented the backend architecture, ensuring efficient data processing and reliable API endpoints."
+    
   },
   {
     name: "Bishal Ranjan Nath",
-    role: "Frontend Developer",
+ 
     img: "/Bishal.jpeg",
-    bio: "Responsible for the UI/UX design and frontend implementation, delivering a clean and responsive interface."
+   
   },
   {
     name: "Tasdeeque Ruhani",
-    role: "Machine Learning Engineer",
+
     img: "/Taz.jpeg",
-    bio: "Integrated intelligent document processing capabilities using advanced language models and embeddings."
+   
   },
   {
     name: "Abhinil Savarni",
-    role: "",
-    img: "/images/dana.jpg",
-    bio: "Ensured system security and data integrity through best practices in cybersecurity and API protection."
+  
+    img: "/ab.jpeg",
+   
   }
 ];
 
