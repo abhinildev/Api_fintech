@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List
 import tempfile, os, requests, fitz, docx
 from dotenv import load_dotenv
-
+from fastapi.middleware.cors import CORSMiddleware
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
@@ -16,7 +16,19 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 # FastAPI app
 app = FastAPI()
 vector_index = None
+origins=[
+     "http://localhost:5173",  # React/Vite frontend
+    "http://127.0.0.1:5173",
+    
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
 
+)
 # ---------- Global Optimized Embedding Model ----------
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
