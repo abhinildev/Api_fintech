@@ -31,8 +31,7 @@ Built with **FastAPI, LangChain, HuggingFace, FAISS, and React.js**.
 ---
 
 ## 📸 Demo
-Coming soon... (Add screenshots / GIFs of your app in action)
-
+Coming soon... 
 ---
 
 ## ⚙️ Installation
